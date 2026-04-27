@@ -360,6 +360,28 @@ VM1, VM2, VM3, VM4
 
 ```text
 github-project/
+├── demo/
+│   ├── vm1/
+│   │   ├── bind9/
+│   │   │   ├── Dockerfile
+│   │   │   ├── named.conf.local
+│   │   │   ├── named.conf.options
+│   │   │   └── zones/
+│   │   │       ├── technova.local.db
+│   │   │       └── 10.0.0.in-addr.arpa.db
+│   │   ├── docker-compose.yml
+│   │   ├── start.sh
+│   │   ├── stop.sh
+│   │   └── test.sh
+│   ├── vm2/
+│   │   ├── docker-compose.yml
+│   │   ├── nginx.local.conf
+│   │   ├── prometheus.local.yml
+│   │   ├── start.sh
+│   │   ├── stop.sh
+│   │   └── test.sh
+│   └── security/
+│       └── test.sh
 ├── vm1/
 │   ├── dns/
 │   │   ├── db.technova.local
@@ -438,7 +460,6 @@ github-project/
 | HA Database (MySQL Cluster) | Planeado |
 | Kubernetes (AKS) | Planeado |
 | DR Site (região secundária) | Planeado |
-| HTTPS completo (cert válido) | Planeado |
 
 > Estado atual: **Small Enterprise Ready**
 
