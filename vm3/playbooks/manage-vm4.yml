@@ -1,0 +1,14 @@
+---
+- name: Gerir VM4 Monitoring (já existe)
+  hosts: monitoring
+  become: true
+  vars:
+    stack_path: /opt/technova-monitoring
+  tasks:
+    - name: docker compose ps/up
+      community.docker.docker_compose_v2:
+        project_src: "{{ stack_path }}"
+        state: present
+
+    - name: Test Grafana
+      uri: url=http://localhost:3000/api/health status_code=200

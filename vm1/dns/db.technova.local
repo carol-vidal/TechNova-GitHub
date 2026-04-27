@@ -1,0 +1,19 @@
+$TTL 604800
+@   IN  SOA srv-infra.technova.local. admin.technova.local. (
+        2026040702
+        604800
+        86400
+        2419200
+        604800 )
+
+    IN  NS      srv-infra.technova.local.
+
+srv-infra   IN  A   10.0.0.10
+srv-apps    IN  A   10.0.0.20
+srv-auto    IN  A   10.0.0.30
+srv-monit   IN  A   10.0.0.40
+
+infra       IN  CNAME srv-infra
+apps        IN  CNAME srv-apps
+auto        IN  CNAME srv-auto
+monit       IN  CNAME srv-monit

@@ -1,0 +1,35 @@
+- name: Gestão centralizada de utilizadores TechNova
+  hosts: all
+  become: true
+  vars_files:
+    - ../vars/users.yml
+
+  tasks:
+    - name: Criar utilizadores com senha
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        password: "{{ item.password }}"
+        state: "{{ item.state }}"
+        shell: /bin/bash
+        create_home: true
+        update_password: always
+      loop: "{{ users }}"
+      no_log: true
+
+    - name: Adicionar utilizadores ao sudo quando aplicavel
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        groups: sudo
+        append: true
+      loop: "{{ users }}"
+      when: item.state == 'present' and item.sudo | default(false)
+
+    - name: Garantir permissoes da home
+      ansible.builtin.file:
+        path: "/home/{{ item.name }}"
+        state: directory
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0755"
+      loop: "{{ users }}"
+      when: item.state == 'present'

@@ -1,0 +1,47 @@
+---
+- name: TechNova base validation and package setup
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+
+    - name: Ensure common packages are installed
+      apt:
+        name:
+          - curl
+          - vim
+          - htop
+          - git
+          - net-tools
+        state: present
+        update_cache: yes
+
+    - name: Ensure /opt/technova exists
+      file:
+        path: /opt/technova
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create validation file
+      copy:
+        dest: /opt/technova/managed-by-ansible.txt
+        content: |
+          This host is managed by TechNova Ansible (VM3/srv-auto).
+          Managed at:  {{ ansible_date_time.iso8601 }}
+          Hostname:    {{ inventory_hostname }}
+          OS:          {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Kernel:      {{ ansible_kernel }}
+        mode: '0644'
+
+    - name: Ensure UFW is active
+      community.general.ufw:
+        state: enabled
+      ignore_errors: true
+
+    - name: Verify node_exporter is running
+      systemd:
+        name: node_exporter
+        state: started
+      ignore_errors: true

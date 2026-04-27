@@ -1,0 +1,14 @@
+{
+  "name": "technova-asset-manager",
+  "version": "1.0.0",
+  "description": "TechNova demo app",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "mysql2": "^3.11.3",
+    "prom-client": "^15.1.3"
+  }
+}

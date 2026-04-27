@@ -1,0 +1,280 @@
+---
+- name: Deploy TechNova public site on SRV-APPS
+  hosts: apps
+  become: true
+  gather_facts: true
+
+  vars:
+    site_root: /var/www/technova-site
+    app_root: /opt/technova-app
+    compose_file: /opt/technova-app/docker-compose.yml
+    nginx_conf: /opt/technova-app/nginx/default.conf
+
+  tasks:
+    - name: Ensure public site directory exists
+      file:
+        path: "{{ site_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Deploy public index.html
+      copy:
+        dest: "{{ site_root }}/index.html"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          <!DOCTYPE html>
+          <html lang="pt-BR">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>TechNova</title>
+            <style>
+              body {
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background: #f4f7fb;
+                color: #1f2937;
+              }
+              .wrap {
+                max-width: 960px;
+                margin: 0 auto;
+                padding: 80px 24px;
+              }
+              h1 {
+                font-size: 42px;
+                margin-bottom: 16px;
+                color: #0a5c7a;
+              }
+              p {
+                font-size: 18px;
+                line-height: 1.6;
+              }
+              .card {
+                margin-top: 32px;
+                background: #fff;
+                border-radius: 12px;
+                padding: 24px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+              }
+              .button {
+                display: inline-block;
+                margin-top: 20px;
+                background: #0a5c7a;
+                color: #fff;
+                text-decoration: none;
+                padding: 12px 18px;
+                border-radius: 8px;
+              }
+              .button:hover {
+                background: #08465c;
+              }
+              code {
+                background: #eef2f7;
+                padding: 2px 6px;
+                border-radius: 6px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="wrap">
+              <h1>TechNova</h1>
+              <p>Ambiente publicado na SRV-APPS com Nginx, Docker, aplicação Node.js, MySQL e monitorização integrada.</p>
+              <div class="card">
+                <p><strong>Site público:</strong> disponível em <code>/</code></p>
+                <p><strong>Aplicação:</strong> disponível em <code>/app/</code></p>
+                <p><strong>Healthcheck:</strong> disponível em <code>/api/health</code></p>
+                <a class="button" href="/app/">Abrir aplicação</a>
+              </div>
+            </div>
+          </body>
+          </html>
+
+    - name: Deploy nginx default.conf
+      copy:
+        dest: "{{ nginx_conf }}"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          server {
+            listen 80;
+            server_name _;
+
+            access_log /var/log/nginx/access.log;
+            error_log /var/log/nginx/error.log;
+
+            root /var/www/technova-site;
+            index index.html;
+
+            location = / {
+              try_files /index.html =404;
+            }
+
+            location / {
+              try_files $uri $uri/ /index.html;
+            }
+
+            location /app/ {
+              proxy_pass http://app:3000/;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+            }
+
+            location = /app {
+              return 301 /app/;
+            }
+
+            location /metrics {
+              allow 10.0.0.0/24;
+              deny all;
+              proxy_pass http://app:3000/metrics;
+            }
+
+            location /api/health {
+              proxy_pass http://app:3000/api/health;
+            }
+          }
+
+    - name: Deploy corrected docker-compose.yml
+      copy:
+        dest: "{{ compose_file }}"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          services:
+            mysql:
+              image: mysql:8.0
+              container_name: technova-mysql
+              restart: unless-stopped
+              env_file: .env
+              volumes:
+                - mysql_data:/var/lib/mysql
+                - ./logs/mysql:/var/log/mysql
+              networks:
+                - technova-net
+              healthcheck:
+                test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+                interval: 15s
+                timeout: 5s
+                retries: 10
+                start_period: 30s
+
+            app:
+              build: ./app
+              container_name: technova-app
+              restart: unless-stopped
+              env_file: .env
+              depends_on:
+                mysql:
+                  condition: service_healthy
+              volumes:
+                - ./logs/app:/app/logs
+              networks:
+                - technova-net
+              expose:
+                - "3000"
+              healthcheck:
+                test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+                interval: 30s
+                timeout: 10s
+                retries: 5
+                start_period: 60s
+
+            nginx:
+              image: nginx:stable-alpine
+              container_name: technova-nginx
+              restart: unless-stopped
+              depends_on:
+                app:
+                  condition: service_healthy
+              ports:
+                - "80:80"
+              volumes:
+                - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+                - {{ site_root }}:/var/www/technova-site:ro
+              networks:
+                - technova-net
+              healthcheck:
+                test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/api/health || exit 1"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 15s
+
+            cadvisor:
+              image: gcr.io/cadvisor/cadvisor:v0.49.1
+              container_name: technova-cadvisor
+              restart: unless-stopped
+              privileged: true
+              ports:
+                - "8080:8080"
+              devices:
+                - /dev/kmsg
+              volumes:
+                - /:/rootfs:ro
+                - /var/run:/var/run:ro
+                - /sys:/sys:ro
+                - /var/lib/docker:/var/lib/docker:ro
+                - /dev/disk:/dev/disk:ro
+              networks:
+                - technova-net
+
+          networks:
+            technova-net:
+              driver: bridge
+
+          volumes:
+            mysql_data:
+
+    - name: Ensure HTTP allowed in UFW
+      community.general.ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Recreate docker stack
+      command: docker compose down
+      args:
+        chdir: "{{ app_root }}"
+
+    - name: Start docker stack
+      command: docker compose up -d
+      args:
+        chdir: "{{ app_root }}"
+
+    - name: Validate nginx config inside container
+      command: docker exec technova-nginx nginx -t
+      changed_when: false
+
+    - name: Verify static files exist inside nginx container
+      command: docker exec technova-nginx ls -lah /var/www/technova-site
+      register: static_site_check
+      changed_when: false
+
+    - name: Verify public homepage
+      uri:
+        url: http://127.0.0.1/
+        status_code: 200
+
+    - name: Verify application page
+      uri:
+        url: http://127.0.0.1/app/
+        status_code: 200
+
+    - name: Verify application health endpoint
+      uri:
+        url: http://127.0.0.1/api/health
+        status_code: 200
+
+    - name: Show static site files seen by nginx
+      debug:
+        var: static_site_check.stdout_lines

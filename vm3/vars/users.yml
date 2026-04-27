@@ -1,0 +1,20 @@
+users:
+  - name: carolini
+    state: present
+    sudo: false
+    password: '$6$ddWwTPncRKRnYvQN$Da1bYdtwDVN2T0KMAQ7R0zY0XiyRKEcEs7vDp3i/dXLuVstzENPdE7pecdAssqMGw1B/k9ihwBZbgO3Si1BLW1'
+
+  - name: janaina
+    state: present
+    sudo: false
+    password: '$6$xDiORU97OykT67LX$n70N2i6xFEixYlyIvqzKL9E9F6QtrB7.MltKT6LMv7NDOSZt4oRdRm/wTX1tV5DVrMT8PZZMMfn3urwm03nqW/'
+
+  - name: blue
+    state: present
+    sudo: false
+    password: '$6$Jt/W1x157DEu10Jr$C3WR8yt.LNeWPhdr9pv8CWmi.MEt.XWWQSEcF4xCBaXpaJADw21FE7.fWqR0spUpuNEyH3U93FONclL5CpEYj1'
+
+  - name: jupiter
+    state: present
+    sudo: false
+    password: '$6$Vf1imUUnYF2WBbHJ$m4ux92/eZYrEAG1GLuXajlKCOescLQv0JKW.fkr.60uqpikBs/hCF6O8PGtnJx1E6Y83o8tp3Goo0V5io5qro0'

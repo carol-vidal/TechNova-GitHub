@@ -1,0 +1,36 @@
+---
+- name: Adicionar dashboard cAdvisor no Grafana
+  hosts: monitoring
+  become: true
+  vars:
+    grafana_url: http://localhost:3000
+    grafana_user: upskill-technova
+    grafana_pass: upskill#j0l3r4
+
+  tasks:
+    - name: Descarregar dashboard cAdvisor (ID 14282)
+      uri:
+        url: "https://grafana.com/api/dashboards/14282/revisions/latest/download"
+        method: GET
+        return_content: yes
+      register: dashboard_json
+      delegate_to: localhost
+
+    - name: Importar dashboard no Grafana
+      uri:
+        url: "{{ grafana_url }}/api/dashboards/import"
+        method: POST
+        user: "{{ grafana_user }}"
+        password: "{{ grafana_pass }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          dashboard: "{{ dashboard_json.json }}"
+          overwrite: true
+          folderId: 0
+          inputs:
+            - name: "DS_PROMETHEUS"
+              type: datasource
+              pluginId: prometheus
+              value: Prometheus
+        status_code: [200, 412]

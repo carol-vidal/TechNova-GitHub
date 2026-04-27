@@ -1,0 +1,292 @@
+---
+- name: Deploy TechNova self-signed HTTPS on SRV-APPS
+  hosts: apps
+  become: true
+  gather_facts: true
+
+  vars:
+    domain_name: srv-apps-vm2.northcentralus.cloudapp.azure.com
+    site_root: /var/www/technova-site
+    app_root: /opt/technova-app
+    compose_file: /opt/technova-app/docker-compose.yml
+    nginx_conf: /opt/technova-app/nginx/default.conf
+    ssl_dir: /opt/technova-app/nginx/ssl
+    ssl_key: /opt/technova-app/nginx/ssl/technova-selfsigned.key
+    ssl_crt: /opt/technova-app/nginx/ssl/technova-selfsigned.crt
+
+  tasks:
+    - name: Ensure openssl is installed
+      apt:
+        name: openssl
+        state: present
+        update_cache: yes
+
+    - name: Ensure public site directory exists
+      file:
+        path: "{{ site_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Ensure SSL directory exists
+      file:
+        path: "{{ ssl_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Generate private key
+      command: openssl genrsa -out {{ ssl_key }} 2048
+      args:
+        creates: "{{ ssl_key }}"
+
+    - name: Generate self-signed certificate
+      command: >
+        openssl req -x509 -nodes -days 365
+        -key {{ ssl_key }}
+        -out {{ ssl_crt }}
+        -subj "/C=US/ST=North Carolina/L=Charlotte/O=TechNova/OU=Infra/CN={{ domain_name }}"
+        -addext "subjectAltName=DNS:{{ domain_name }},IP:127.0.0.1"
+      args:
+        creates: "{{ ssl_crt }}"
+
+    - name: Set certificate permissions
+      file:
+        path: "{{ ssl_crt }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Set private key permissions
+      file:
+        path: "{{ ssl_key }}"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Ensure HTTP and HTTPS allowed in UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "80"
+        - "443"
+
+    - name: Deploy docker-compose with HTTPS support
+      copy:
+        dest: "{{ compose_file }}"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          services:
+            mysql:
+              image: mysql:8.0
+              container_name: technova-mysql
+              restart: unless-stopped
+              env_file: .env
+              volumes:
+                - mysql_data:/var/lib/mysql
+                - ./logs/mysql:/var/log/mysql
+              networks:
+                - technova-net
+              healthcheck:
+                test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+                interval: 15s
+                timeout: 5s
+                retries: 10
+                start_period: 30s
+
+            app:
+              build: ./app
+              container_name: technova-app
+              restart: unless-stopped
+              env_file: .env
+              depends_on:
+                mysql:
+                  condition: service_healthy
+              volumes:
+                - ./logs/app:/app/logs
+              networks:
+                - technova-net
+              expose:
+                - "3000"
+              healthcheck:
+                test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+                interval: 30s
+                timeout: 10s
+                retries: 5
+                start_period: 60s
+
+            nginx:
+              image: nginx:stable-alpine
+              container_name: technova-nginx
+              restart: unless-stopped
+              depends_on:
+                app:
+                  condition: service_healthy
+              ports:
+                - "80:80"
+                - "443:443"
+              volumes:
+                - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+                - {{ site_root }}:/var/www/technova-site:ro
+                - {{ ssl_dir }}:/etc/nginx/ssl:ro
+              networks:
+                - technova-net
+              healthcheck:
+                test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/api/health || exit 1"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 15s
+
+            cadvisor:
+              image: gcr.io/cadvisor/cadvisor:v0.49.1
+              container_name: technova-cadvisor
+              restart: unless-stopped
+              privileged: true
+              ports:
+                - "8080:8080"
+              devices:
+                - /dev/kmsg
+              volumes:
+                - /:/rootfs:ro
+                - /var/run:/var/run:ro
+                - /sys:/sys:ro
+                - /var/lib/docker:/var/lib/docker:ro
+                - /dev/disk:/dev/disk:ro
+              networks:
+                - technova-net
+
+          networks:
+            technova-net:
+              driver: bridge
+
+          volumes:
+            mysql_data:
+
+    - name: Deploy nginx config for HTTP redirect and HTTPS site
+      copy:
+        dest: "{{ nginx_conf }}"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          server {
+            listen 80;
+            server_name {{ domain_name }};
+
+            access_log /var/log/nginx/access.log;
+            error_log /var/log/nginx/error.log;
+
+            location / {
+              return 301 https://$host$request_uri;
+            }
+          }
+
+          server {
+            listen 443 ssl;
+            http2 on;
+            server_name {{ domain_name }};
+
+            access_log /var/log/nginx/access.log;
+            error_log /var/log/nginx/error.log;
+
+            ssl_certificate /etc/nginx/ssl/technova-selfsigned.crt;
+            ssl_certificate_key /etc/nginx/ssl/technova-selfsigned.key;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_prefer_server_ciphers off;
+
+            root /var/www/technova-site;
+            index index.html;
+
+            location = / {
+              try_files /index.html =404;
+            }
+
+            location / {
+              try_files $uri $uri/ /index.html;
+            }
+
+            location /app/ {
+              proxy_pass http://app:3000/;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto https;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+            }
+
+            location = /app {
+              return 301 /app/;
+            }
+
+            location /metrics {
+              allow 10.0.0.0/24;
+              deny all;
+              proxy_pass http://app:3000/metrics;
+            }
+
+            location /api/health {
+              proxy_pass http://app:3000/api/health;
+            }
+          }
+
+    - name: Recreate stack
+      shell: |
+        docker compose down
+        docker compose up -d
+      args:
+        chdir: "{{ app_root }}"
+
+    - name: Wait for stack startup
+      pause:
+        seconds: 20
+
+    - name: Validate nginx config inside container
+      command: docker exec technova-nginx nginx -t
+      changed_when: false
+
+    - name: Validate HTTP redirect locally
+      shell: curl -I -s http://127.0.0.1/ | head -n 1
+      register: redirect_status
+      changed_when: false
+
+    - name: Validate HTTPS homepage locally
+      shell: curl -k -s -o /dev/null -w "%{http_code}" https://127.0.0.1/
+      register: https_home_status
+      retries: 12
+      delay: 5
+      until: https_home_status.stdout == '200'
+      changed_when: false
+
+    - name: Validate HTTPS app locally
+      shell: curl -k -s -o /dev/null -w "%{http_code}" https://127.0.0.1/app/
+      register: https_app_status
+      retries: 12
+      delay: 5
+      until: https_app_status.stdout == '200'
+      changed_when: false
+
+    - name: Validate HTTPS health locally
+      shell: curl -k -s -o /dev/null -w "%{http_code}" https://127.0.0.1/api/health
+      register: https_health_status
+      retries: 12
+      delay: 5
+      until: https_health_status.stdout == '200'
+      changed_when: false
+
+    - name: Show final endpoints
+      debug:
+        msg:
+          - "HTTP  -> http://{{ domain_name }}/ (redirects to HTTPS)"
+          - "HTTPS -> https://{{ domain_name }}/"
+          - "APP   -> https://{{ domain_name }}/app/"
+          - "API   -> https://{{ domain_name }}/api/health"
+          - "Cert  -> self-signed, browser warning expected"

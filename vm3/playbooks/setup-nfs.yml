@@ -1,0 +1,93 @@
+---
+- name: Configurar NFS Server na VM1
+  hosts: infra
+  become: true
+  vars:
+    nfs_export_path: /srv/nfs/backups
+    nfs_network: 10.0.0.0/24
+
+  tasks:
+    - name: Instalar nfs-kernel-server
+      apt:
+        name:
+          - nfs-kernel-server
+          - nfs-common
+        state: present
+        update_cache: yes
+
+    - name: Criar diretório de backups
+      file:
+        path: "{{ nfs_export_path }}"
+        state: directory
+        owner: nobody
+        group: nogroup
+        mode: '0750'
+
+    - name: Configurar /etc/exports
+      lineinfile:
+        path: /etc/exports
+        line: "{{ nfs_export_path }} {{ nfs_network }}(rw,sync,no_subtree_check)"
+        state: present
+        create: yes
+      notify: reload exports
+
+    - name: Garantir nfs-kernel-server ativo
+      systemd:
+        name: nfs-kernel-server
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: reload exports
+      command: exportfs -ra
+
+- name: Configurar clientes NFS
+  hosts: apps:automation:monitoring
+  become: true
+  vars:
+    nfs_server_ip: 10.0.0.10
+    nfs_export_path: /srv/nfs/backups
+    mount_point: /mnt/backups
+
+  tasks:
+    - name: Instalar nfs-common
+      apt:
+        name: nfs-common
+        state: present
+        update_cache: yes
+
+    - name: Criar ponto de montagem
+      file:
+        path: "{{ mount_point }}"
+        state: directory
+        mode: '0755'
+
+    - name: Montar NFS e persistir em fstab
+      ansible.posix.mount:
+        path: "{{ mount_point }}"
+        src: "{{ nfs_server_ip }}:{{ nfs_export_path }}"
+        fstype: nfs
+        opts: defaults,_netdev
+        state: mounted
+
+- name: Configurar backup automático na VM2
+  hosts: apps
+  become: true
+
+  tasks:
+    - name: Copiar script de backup para VM2
+      copy:
+        src: "{{ playbook_dir }}/../files/backup-technova.sh"
+        dest: /usr/local/bin/backup-technova.sh
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configurar cron diário às 02:00
+      cron:
+        name: "Backup TechNova para NFS"
+        minute: "0"
+        hour: "2"
+        job: "/usr/local/bin/backup-technova.sh >> /var/log/technova-backup.log 2>&1"
+        user: root
+        state: present
