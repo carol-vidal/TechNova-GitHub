@@ -1,0 +1,82 @@
+# Stack VM1 (srv-infra) em modo demo local.
+# Simula os três serviços de infraestrutura da VM1:
+#   - Bind9  : servidor DNS autoritativo para technova.local
+#   - Chrony : servidor NTP para sincronização de tempo
+#   - NFS    : servidor de partilha de ficheiros
+# Uso: gerido automaticamente por start-vm1.sh / stop-vm1.sh
+
+services:
+
+  # Bind9 — DNS autoritativo para a zona technova.local.
+  # Porta 5353 no host (evita conflito com DNS do sistema na 53).
+  vm1-dns:
+    build:
+      context: ./bind9
+    container_name: vm1-dns
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+    ports:
+      - "5353:53/tcp"
+      - "5353:53/udp"
+    networks:
+      - technova-vm1
+    healthcheck:
+      test: ["CMD-SHELL", "ss -tlnp | grep -q ':53 '"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Chrony — servidor NTP. Sincroniza com fontes públicas e serve a rede interna.
+  # Porta 1123 no host (porta privilegiada 123 fica dentro do container).
+  vm1-ntp:
+    image: cturra/ntp:latest
+    container_name: vm1-ntp
+    restart: unless-stopped
+    ports:
+      - "1123:123/udp"
+    environment:
+      - NTP_SERVERS=time.cloudflare.com,pool.ntp.org
+      - LOG_LEVEL=0
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    networks:
+      - technova-vm1
+    healthcheck:
+      test: ["CMD-SHELL", "chronyc tracking > /dev/null 2>&1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # NFS Server — exporta /exports para a rede interna.
+  # Requer modo privilegiado para acesso aos módulos de kernel NFS.
+  vm1-nfs:
+    image: erichough/nfs-server:latest
+    container_name: vm1-nfs
+    restart: unless-stopped
+    privileged: true
+    environment:
+      - NFS_EXPORT_0=/exports *(rw,sync,no_subtree_check,no_root_squash)
+    volumes:
+      - nfs_exports:/exports
+    ports:
+      - "2049:2049/tcp"
+      - "2049:2049/udp"
+    networks:
+      - technova-vm1
+    healthcheck:
+      test: ["CMD-SHELL", "rpcinfo -p localhost | grep -q 100003"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+networks:
+  technova-vm1:
+    driver: bridge
+
+volumes:
+  nfs_exports:

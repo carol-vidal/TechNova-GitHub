@@ -1,0 +1,38 @@
+# Configuração Prometheus para demo local.
+# Diferença face à produção (vm4-monit/prometheus/prometheus.yml):
+#   - Os targets usam nomes de serviço Docker ("app", "nginx") em vez de IPs de VM
+#     (10.0.0.10, 10.0.0.20, etc.) que não existem na máquina local.
+#   - Os jobs de node-exporter das VMs (vm1, vm2, vm3, vm4) são omitidos
+#     porque não existem VMs reais no demo.
+# As regras de alerta são as mesmas da produção (carregadas de vm4-monit/prometheus/alerts.yml).
+
+global:
+  scrape_interval:     15s  # recolhe métricas a cada 15 segundos
+  evaluation_interval: 15s  # avalia regras de alerta a cada 15 segundos
+
+rule_files:
+  - /etc/prometheus/alerts.yml  # partilhado com a config de produção
+
+scrape_configs:
+
+  # O Prometheus monitoriza-se a si próprio.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Métricas da app Node.js — acesso direto ao container (sem passar pelo Nginx).
+  - job_name: 'app-api-health'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['app:3000']
+
+  # Health check via Nginx — confirma que o reverse proxy está a encaminhar corretamente.
+  - job_name: 'app-api-nginx'
+    metrics_path: /api/health
+    static_configs:
+      - targets: ['nginx:80']
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
