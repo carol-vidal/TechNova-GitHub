@@ -426,80 +426,6 @@ github-project/
         ├── Dockerfile
         └── server.py
 ```
-
----
-
-## Troubleshooting
-
-### DNS não resolve nomes `technova.local`
-
-```bash
-# Verificar se o Bind9 está ativo na VM1
-systemctl status named
-
-# Testar resolução a partir de outra VM
-nslookup srv-apps.technova.local 10.0.0.10
-```
-
-### Ansible não consegue ligar às VMs
-
-```bash
-# Verificar conectividade
-cd /vm3/scripts && sh test-connectivity.sh
-
-# Verificar inventário
-cat /vm3/inventory/inventory.ini
-
-# Testar ping Ansible
-ansible all -i inventory/inventory.ini -m ping
-```
-
-### Containers Docker não arrancam (VM2)
-
-```bash
-# Ver estado dos containers
-docker compose ps
-
-# Ver logs de um container específico
-docker compose logs technova-app
-
-# Reiniciar stack
-docker compose down && docker compose up -d
-```
-
-### Prometheus não recebe métricas de uma VM
-
-```bash
-# Verificar se o Node Exporter está ativo
-systemctl status node_exporter
-
-# Testar endpoint manualmente
-curl http://10.0.0.10:9100/metrics
-```
-
-### Alertas não chegam ao Webhook
-
-```bash
-# Verificar logs do Alertmanager
-docker compose logs technova-alertmanager
-
-# Verificar logs do webhook receiver
-docker compose logs technova-webhook-listener
-
-# Ver alertas registados
-cat /tmp/technova-alerts.log
-```
-
-### Grafana não mostra dados
-
-```bash
-# Verificar se o Prometheus está acessível
-curl http://10.0.0.40:9090/-/healthy
-
-# Verificar se o Loki está acessível
-curl http://10.0.0.40:3100/ready
-```
-
 ---
 
 ## Evolução Futura
@@ -520,8 +446,8 @@ curl http://10.0.0.40:3100/ready
 
 ## Autores
 
-Projeto desenvolvido no âmbito do programa **Upskill — Administração de Sistemas Linux**.
-
+Projeto desenvolvido no âmbito do programa **Upskill — Administração de Sistemas Linux** 2025/2026.
+Carolini Vidal, Janaina Pascoal, Fabrício Lopes.
 ---
 
 *Infraestrutura provisionada em Microsoft Azure · Domínio interno: `technova.local`*
