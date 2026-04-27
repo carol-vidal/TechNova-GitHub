@@ -1,0 +1,14 @@
+$TTL 86400
+@   IN  SOA srv-infra.technova.local. admin.technova.local. (
+            2024010101 ; Serial
+            3600       ; Refresh
+            1800       ; Retry
+            604800     ; Expire
+            86400 )    ; Negative Cache TTL
+
+@   IN  NS  srv-infra.technova.local.
+
+10  IN  PTR srv-infra.technova.local.
+20  IN  PTR srv-apps.technova.local.
+30  IN  PTR srv-auto.technova.local.
+40  IN  PTR srv-monit.technova.local.

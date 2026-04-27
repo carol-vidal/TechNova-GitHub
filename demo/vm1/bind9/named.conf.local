@@ -1,0 +1,11 @@
+// Zona direta — resolução de nomes internos technova.local.
+zone "technova.local" IN {
+    type master;
+    file "/etc/bind/zones/technova.local.db";
+};
+
+// Zona inversa — resolução de IPs da rede 10.0.0.0/24.
+zone "0.0.10.in-addr.arpa" IN {
+    type master;
+    file "/etc/bind/zones/10.0.0.in-addr.arpa.db";
+};
