@@ -1,0 +1,44 @@
+---
+- name: Ler hashes dos users de {{ source_host }}
+  hosts: "{{ source_host }}"
+  become: true
+  vars:
+    managed_users:
+      - blue
+      - carolini
+      - janaina
+      - jupiter
+  tasks:
+    - name: Ler hash de cada user
+      shell: "getent shadow {{ item }} | cut -d: -f2"
+      register: user_hashes
+      loop: "{{ managed_users }}"
+      changed_when: false
+      ignore_errors: true
+
+    - name: Construir dict de hashes
+      set_fact:
+        hashes_dict: "{{ hashes_dict | default({}) | combine({ item.item: item.stdout }) }}"
+      loop: "{{ user_hashes.results }}"
+      when: item.stdout != ""
+
+- name: Propagar hashes para todas as outras VMs
+  hosts: all
+  become: true
+  vars:
+    managed_users:
+      - blue
+      - carolini
+      - janaina
+      - jupiter
+  tasks:
+    - name: Aplicar hash de cada user
+      user:
+        name: "{{ item }}"
+        password: "{{ hostvars[groups[source_host][0]]['hashes_dict'][item] }}"
+        update_password: always
+        state: present
+      loop: "{{ managed_users }}"
+      when:
+        - inventory_hostname != groups[source_host][0]
+        - hostvars[groups[source_host][0]]['hashes_dict'][item] is defined

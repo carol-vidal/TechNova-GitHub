@@ -1,0 +1,45 @@
+---
+- name: Gerir VM2 App Stack
+  hosts: apps
+  become: true
+  vars:
+    stack_path: /opt/technova-app
+
+  tasks:
+    - name: Verificar Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Down stack (garantir arranque limpo)
+      shell: docker compose down
+      args:
+        chdir: "{{ stack_path }}"
+
+    - name: Up stack com rebuild e wait
+      shell: docker compose up -d --build --wait
+      args:
+        chdir: "{{ stack_path }}"
+      async: 180
+      poll: 10
+
+    - name: Aguardar MySQL inicializar
+      pause:
+        seconds: 30
+
+    - name: Test app via Nginx (porta 80)
+      uri:
+        url: http://localhost/api/health
+        status_code: 200
+      retries: 12
+      delay: 10
+
+    - name: Status final
+      shell: docker compose ps
+      args:
+        chdir: "{{ stack_path }}"
+      register: ps_out
+
+    - debug:
+        var: ps_out.stdout_lines

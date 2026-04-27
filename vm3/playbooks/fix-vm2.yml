@@ -1,0 +1,37 @@
+---
+- name: Fix VM2 - DB Timing Issue
+  hosts: apps
+  become: true
+  vars:
+    stack_path: /opt/technova-app
+  tasks:
+    - name: Down stack
+      shell: docker compose down
+      args:
+        chdir: "{{ stack_path }}"
+
+    - name: Up stack com rebuild
+      shell: docker compose up -d --build --wait
+      args:
+        chdir: "{{ stack_path }}"
+      async: 180
+      poll: 10
+
+    - name: Aguardar app ficar healthy
+      pause:
+        seconds: 30
+
+    - name: Test nginx proxy (porta 80)
+      uri:
+        url: http://localhost/api/health
+        status_code: 200
+      retries: 12
+      delay: 10
+
+    - name: Status final
+      shell: docker compose ps
+      args:
+        chdir: "{{ stack_path }}"
+      register: ps_out
+
+    - debug: var=ps_out.stdout_lines

@@ -1,0 +1,68 @@
+cat << 'EOF' > /opt/technova-automation/playbooks/deploy-shadow-watcher.yml
+---
+- name: Deploy shadow-watcher em todas as VMs
+  hosts: all
+  become: true
+  vars:
+    vm3_ip: "10.0.0.30"
+    deploy_user: "deploy"
+
+  tasks:
+    - name: Instalar inotify-tools
+      apt:
+        name: inotify-tools
+        state: present
+        update_cache: yes
+
+    - name: Copiar watch-shadow.sh adaptado
+      copy:
+        dest: /opt/watch-shadow.sh
+        mode: '0755'
+        owner: root
+        group: "{{ deploy_user }}"
+        content: |
+          #!/bin/bash
+          MYHOST="{{ group_names[0] }}"
+          VM3="{{ vm3_ip }}"
+          echo "[$(date)] Watcher iniciado em $MYHOST"
+          while inotifywait -e close_write,moved_to,create -q --format '%f' /etc 2>/dev/null; do
+            echo "[$(date)] Shadow mudou em $MYHOST"
+            sleep 2
+            ssh -i /home/{{ deploy_user }}/.ssh/id_ed25519 \
+                -o StrictHostKeyChecking=no {{ deploy_user }}@${VM3} \
+                "flock -n /tmp/sync-users.lock \
+                 /opt/technova-automation/scripts/sync-users.sh ${MYHOST}"
+          done
+
+    - name: Adicionar deploy ao grupo shadow
+      user:
+        name: "{{ deploy_user }}"
+        groups: shadow
+        append: yes
+
+    - name: Criar shadow-watcher.service
+      copy:
+        dest: /etc/systemd/system/shadow-watcher.service
+        content: |
+          [Unit]
+          Description=Shadow watcher - sync passwords via Ansible
+          After=network.target
+
+          [Service]
+          User={{ deploy_user }}
+          ExecStart=/opt/watch-shadow.sh
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd e ativar watcher
+      systemd:
+        name: shadow-watcher
+        enabled: yes
+        state: restarted
+        daemon_reload: yes
+EOF

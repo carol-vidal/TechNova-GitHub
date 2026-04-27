@@ -1,0 +1,113 @@
+---
+- name: Setup completo shadow-watcher em todas as VMs
+  hosts: all
+  become: true
+  vars:
+    vm3_ip: "10.0.0.30"
+    deploy_user: "deploy"
+    host_map:
+      srv-infra: infra
+      srv-apps: apps
+      srv-auto: auto
+      srv-monit: monitoring
+
+  tasks:
+    - name: Instalar inotify-tools
+      apt:
+        name: inotify-tools
+        state: present
+        update_cache: yes
+
+    - name: Adicionar deploy ao grupo shadow
+      user:
+        name: "{{ deploy_user }}"
+        groups: shadow
+        append: yes
+
+    - name: Gerar chave SSH para deploy (se não existir)
+      become_user: "{{ deploy_user }}"
+      openssh_keypair:
+        path: "/home/{{ deploy_user }}/.ssh/id_ed25519"
+        type: ed25519
+        comment: "watcher@{{ inventory_hostname }}"
+        force: false
+
+    - name: Recolher chave pública de cada VM
+      slurp:
+        src: "/home/{{ deploy_user }}/.ssh/id_ed25519.pub"
+      register: pubkey
+
+    - name: Autorizar chave de cada VM no srv-auto
+      authorized_key:
+        user: "{{ deploy_user }}"
+        key: "{{ hostvars[item]['pubkey']['content'] | b64decode }}"
+        state: present
+      delegate_to: srv-auto
+      loop: "{{ groups['all'] }}"
+      when: hostvars[item]['pubkey'] is defined
+      run_once: false
+
+    - name: Copiar watch-shadow.sh corrigido
+      copy:
+        dest: /opt/watch-shadow.sh
+        mode: '0755'
+        owner: root
+        group: "{{ deploy_user }}"
+        content: |
+          #!/bin/bash
+          MYHOST="{{ host_map[inventory_hostname] }}"
+          VM3="{{ vm3_ip }}"
+          echo "[$(date)] Watcher iniciado em $MYHOST"
+          while inotifywait -e close_write,moved_to,create -q --format '%f' /etc 2>/dev/null; do
+            echo "[$(date)] Shadow mudou em $MYHOST"
+            sleep 2
+            ssh -i /home/{{ deploy_user }}/.ssh/id_ed25519 \
+                -o StrictHostKeyChecking=no \
+                {{ deploy_user }}@${VM3} \
+                "flock -n /tmp/sync-users.lock \
+                 /opt/technova-automation/scripts/sync-users.sh ${MYHOST}"
+          done
+
+    - name: Criar shadow-watcher.service corrigido
+      copy:
+        dest: /etc/systemd/system/shadow-watcher.service
+        content: |
+          [Unit]
+          Description=Shadow watcher - sync passwords via Ansible
+          After=network.target
+
+          [Service]
+          User={{ deploy_user }}
+          ExecStart=/opt/watch-shadow.sh
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Ativar e reiniciar shadow-watcher
+      systemd:
+        name: shadow-watcher
+        enabled: yes
+        state: restarted
+        daemon_reload: yes
+
+- name: Garantir sync-users.sh no srv-auto
+  hosts: automation
+  become: true
+  tasks:
+    - name: Criar sync-users.sh
+      copy:
+        dest: /opt/technova-automation/scripts/sync-users.sh
+        mode: '0755'
+        owner: deploy
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          SOURCE_HOST=$1
+          cd /opt/technova-automation
+          echo "[$(date)] Sync disparado por ${SOURCE_HOST}" >> logs/sync-users.log
+          sudo -u deploy ansible-playbook playbooks/sync-users.yml \
+              -e "source_host=${SOURCE_HOST}" >> logs/sync-users.log 2>&1

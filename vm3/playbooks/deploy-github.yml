@@ -1,0 +1,128 @@
+---
+- name: Collect TechNova configs into github tree on VM3
+  hosts: automation
+  gather_facts: false
+  become: true
+
+  vars:
+    github_root: /home/deploy/github
+    project_owner: deploy
+
+    items:
+      - { vm: vm1, host: srv-infra, service: root, src: /home/deploy/ansible.sh, kind: file }
+      - { vm: vm1, host: srv-infra, service: root, src: /home/deploy/bind9exporterfix.sh, kind: file }
+      - { vm: vm1, host: srv-infra, service: root, src: /home/deploy/nodeexporterfix.sh, kind: file }
+      - { vm: vm1, host: srv-infra, service: root, src: /home/deploy/vm2.sh, kind: file }
+      - { vm: vm1, host: srv-infra, service: root, src: /home/deploy/vm3.sh, kind: file }
+      - { vm: vm1, host: srv-infra, service: root, src: /home/deploy/vm4.sh, kind: file }
+      - { vm: vm1, host: srv-infra, service: dns, src: /etc/bind/named.conf.options, kind: file }
+      - { vm: vm1, host: srv-infra, service: dns, src: /etc/bind/named.conf.local, kind: file }
+      - { vm: vm1, host: srv-infra, service: dns, src: /etc/bind/db.technova.local, kind: file }
+      - { vm: vm1, host: srv-infra, service: ntp, src: /etc/chrony/chrony.conf, kind: file }
+      - { vm: vm1, host: srv-infra, service: nfs, src: /etc/exports, kind: file }
+      - { vm: vm1, host: srv-infra, service: security, src: /etc/ssh/sshd_config.d/99-technova-hardening.conf, kind: file }
+      - { vm: vm1, host: srv-infra, service: security, src: /etc/fail2ban/jail.local, kind: file }
+
+      - { vm: vm2, host: srv-apps, service: root, src: /opt/technova-app/docker-compose.yml, kind: file }
+      - { vm: vm2, host: srv-apps, service: app, src: /opt/technova-app/app, kind: dir }
+      - { vm: vm2, host: srv-apps, service: arch-site, src: /opt/technova-app/arch-site, kind: dir }
+      - { vm: vm2, host: srv-apps, service: backups, src: /opt/technova-app/backups, kind: dir }
+      - { vm: vm2, host: srv-apps, service: logs, src: /opt/technova-app/logs, kind: dir }
+      - { vm: vm2, host: srv-apps, service: nginx, src: /opt/technova-app/nginx, kind: dir }
+      - { vm: vm2, host: srv-apps, service: scripts, src: /opt/technova-app/scripts, kind: dir }
+
+      - { vm: vm3, host: srv-auto, service: root, src: /opt/technova-automation/ansible.cfg, kind: file }
+      - { vm: vm3, host: srv-auto, service: root, src: /opt/technova-automation/health, kind: file }
+      - { vm: vm3, host: srv-auto, service: root, src: /opt/technova-automation/teste, kind: file }
+      - { vm: vm3, host: srv-auto, service: files, src: /opt/technova-automation/files, kind: dir }
+      - { vm: vm3, host: srv-auto, service: inventory, src: /opt/technova-automation/inventory, kind: dir }
+      - { vm: vm3, host: srv-auto, service: logs, src: /opt/technova-automation/logs, kind: dir }
+      - { vm: vm3, host: srv-auto, service: playbooks, src: /opt/technova-automation/playbooks, kind: dir }
+      - { vm: vm3, host: srv-auto, service: roles, src: /opt/technova-automation/roles, kind: dir }
+      - { vm: vm3, host: srv-auto, service: scripts, src: /opt/technova-automation/scripts, kind: dir }
+      - { vm: vm3, host: srv-auto, service: vars, src: /opt/technova-automation/vars, kind: dir }
+
+      - { vm: vm4, host: srv-monit, service: root, src: /opt/technova-monitoring/docker-compose.yml, kind: file }
+      - { vm: vm4, host: srv-monit, service: alertmanager, src: /opt/technova-monitoring/alertmanager, kind: dir }
+      - { vm: vm4, host: srv-monit, service: backups, src: /opt/technova-monitoring/backups, kind: dir }
+      - { vm: vm4, host: srv-monit, service: grafana, src: /opt/technova-monitoring/grafana, kind: dir }
+      - { vm: vm4, host: srv-monit, service: loki, src: /opt/technova-monitoring/loki, kind: dir }
+      - { vm: vm4, host: srv-monit, service: prometheus, src: /opt/technova-monitoring/prometheus, kind: dir }
+      - { vm: vm4, host: srv-monit, service: webhook, src: /opt/technova-monitoring/webhook, kind: dir }
+
+  tasks:
+    - name: Ensure github root exists
+      ansible.builtin.file:
+        path: "{{ github_root }}"
+        state: directory
+        owner: "{{ project_owner }}"
+        group: "{{ project_owner }}"
+        mode: "0755"
+
+    - name: Ensure service folders exist
+      ansible.builtin.file:
+        path: "{{ github_root }}/{{ item.vm }}/{{ item.service }}"
+        state: directory
+        owner: "{{ project_owner }}"
+        group: "{{ project_owner }}"
+        mode: "0755"
+      loop: "{{ items }}"
+
+    - name: Find source files
+      ansible.builtin.find:
+        paths: "{{ item.src }}"
+        recurse: yes
+        file_type: file
+      delegate_to: "{{ item.host }}"
+      loop: "{{ items | selectattr('kind', 'equalto', 'dir') | list }}"
+      register: dir_find
+      changed_when: false
+
+    - name: Copy directory file list locally
+      ansible.builtin.set_fact:
+        copy_jobs: "{{ copy_jobs | default([]) + [ {
+          'vm': item.0.item.vm,
+          'service': item.0.item.service,
+          'src_root': item.0.item.src,
+          'src_file': item.1.path,
+          'rel_path': item.1.path | regex_replace('^' ~ (item.0.item.src | regex_escape) ~ '/?', '')
+        } ] }}"
+      loop: "{{ dir_find.results | subelements('files') }}"
+
+    - name: Fetch files from remote hosts to controller
+      ansible.builtin.fetch:
+        src: "{{ item.src_file }}"
+        dest: "/tmp/technova-github/{{ item.vm }}/{{ item.service }}/{{ item.rel_path }}"
+        flat: true
+      delegate_to: "{{ item.vm == 'vm1' and 'srv-infra' or item.vm == 'vm2' and 'srv-apps' or item.vm == 'vm3' and 'srv-auto' or 'srv-monit' }}"
+      loop: "{{ copy_jobs }}"
+      register: fetched
+
+    - name: Copy fetched files into github tree
+      ansible.builtin.copy:
+        src: "/tmp/technova-github/{{ item.vm }}/{{ item.service }}/{{ item.rel_path }}"
+        dest: "{{ github_root }}/{{ item.vm }}/{{ item.service }}/{{ item.rel_path }}"
+        owner: "{{ project_owner }}"
+        group: "{{ project_owner }}"
+        mode: preserve
+        remote_src: true
+      loop: "{{ copy_jobs }}"
+
+    - name: Copy source files from remote hosts
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ github_root }}/{{ item.vm }}/{{ item.service }}/{{ item.src | basename }}"
+        remote_src: true
+        owner: "{{ project_owner }}"
+        group: "{{ project_owner }}"
+        mode: preserve
+      delegate_to: "{{ item.host }}"
+      loop: "{{ items | selectattr('kind', 'equalto', 'file') | list }}"
+
+    - name: Fix ownership of github tree
+      ansible.builtin.file:
+        path: "{{ github_root }}"
+        state: directory
+        owner: "{{ project_owner }}"
+        group: "{{ project_owner }}"
+        recurse: true

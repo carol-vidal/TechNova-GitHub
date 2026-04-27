@@ -1,0 +1,11 @@
+zone "technova.local" IN {
+    type master;
+    file "/etc/bind/db.technova.local";
+    allow-update { none; };
+};
+
+zone "0.0.10.in-addr.arpa" IN {
+    type master;
+    file "/etc/bind/db.10.0.0";
+    allow-update { none; };
+};

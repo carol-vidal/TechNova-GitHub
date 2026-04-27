@@ -1,0 +1,26 @@
+acl internal-network {
+    10.0.0.0/24;
+};
+
+options {
+    directory "/var/cache/bind";
+
+    recursion yes;
+    allow-query { localhost; internal-network; };
+    allow-recursion { localhost; internal-network; };
+    allow-transfer { localhost; };
+    listen-on { any; };
+    listen-on-v6 { none; };
+
+    forwarders {
+        1.1.1.1;
+        8.8.8.8;
+    };
+
+    dnssec-validation auto;
+    auth-nxdomain no;
+};
+
+statistics-channels {
+  inet 127.0.0.1 port 8053 allow { 127.0.0.1; };
+};
