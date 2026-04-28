@@ -26,7 +26,6 @@
 - [Fluxo de Logs e Métricas](#fluxo-de-logs-e-métricas)
 - [Segurança](#segurança)
 - [Estrutura do Repositório](#estrutura-do-repositório)
-- [Troubleshooting](#troubleshooting)
 - [Evolução Futura](#evolução-futura)
 - [Autores](#autores)
 
